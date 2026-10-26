@@ -165,8 +165,10 @@ dialog{max-height:calc(100vh - 24px);max-height:calc(100dvh - 24px)}
 </style></head><body>
 <div class="app"><nav id="nav"></nav><main id="main"></main></div><dialog id="dlg"></dialog><div id="toast" role="status"></div><datalist id="firms"></datalist>
 <script src="https://cdn.jsdelivr.net/npm/lucide@0.469.0/dist/umd/lucide.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4"></script>
 <script>
+/* Auth state is declared first so render()/deco() can never read it before it exists. */
+let authUser=null,authReady=false,LM='in',authBusy=false,authMsg=null,pendingEmail='';
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])),uid=()=>Math.random().toString(36).slice(2,10),today=()=>new Date().toISOString().slice(0,10);
 const INV=['New challenge','Account purchase','Reset','Activation fee','Subscription / recurring','Other expense','Refund'],PST=['Requested','Approved','Processing','Received','Rejected','Cancelled'],AST=['Evaluation','Funded','Passed','Failed','Breached','Inactive','Closed'],CAT=['Payment Receipt','Payout Certificate','Payout Invoice','Other'],CUR=['USD','INR','USDT','BTC','ETH'],OK=['pdf','jpg','jpeg','png','webp','doc','docx','xls','xlsx','csv','txt'],sym={USD:'$',INR:'₹'};
 const NAV=[['dashboard','Dashboard'],['firms','Prop Firms'],['accounts','Accounts &amp; Documents'],['queue','Review Queue'],['analytics','Analytics'],['settings','Settings'],['login','Login / Sign up']];
@@ -377,7 +379,7 @@ act.dsel=id=>{DOP.has(id)?DOP.delete(id):DOP.add(id);$('#dx').innerHTML=dxBody()
 const NIC={dashboard:'layout-dashboard',firms:'landmark',accounts:'folder-open',analytics:'trending-up',settings:'sliders-horizontal',queue:'inbox'},BIC={new:'plus',edit:'pencil',del:'trash-2',exp:'download',expm:'download',exadv:'file-down',expjson:'download',dup:'upload',reset:'rotate-ccw',areset:'rotate-ccw',dl:'download',prev:'eye',rmdoc:'trash-2',dfirm:'trash-2',wipe:'trash-2',rmsample:'eraser'},
 KIC=[['pending','clock','#fbbf24'],['recovery','gauge','#22d3ee'],['funded','badge-check','#34d399'],['failed','octagon-x','#fb7185'],['active','activity','#22d3ee'],['expense','receipt','#a78bfa'],['refund','rotate-ccw','#22d3ee'],['roi','percent','#a78bfa'],['invest','wallet','#22d3ee'],['profit','trending-up','#34d399'],['payout','banknote','#34d399'],['month','calendar-days','#6aa3ff'],['cash','arrow-left-right','#6aa3ff'],['year','calendar','#6aa3ff'],['range','calendar-range','#6aa3ff'],['account','layers','#6aa3ff']];
 function deco(){const nv=$('#nav');if(nv&&!nv.querySelector('.nm')){const nm=document.createElement('div');nm.className='nm';nv.querySelectorAll('.nv').forEach(a=>nm.appendChild(a));nv.appendChild(nm);nv.querySelector('.brand').insertAdjacentHTML('afterend','<button class="mb" data-a="menu" aria-label="Open menu" aria-expanded="false"><span></span><span></span><span></span></button>')}
-NIC.login=sess()?'log-out':'log-in';{const lk=document.querySelector('#nav a[href="#login"]');if(lk&&sess())lk.textContent='Sign out'}
+NIC.login=authUser?'log-out':'log-in';{const lk=document.querySelector('#nav a[href="#login"]');if(lk&&authUser)lk.textContent='Sign out'}
 if(!$('#gdefs'))document.body.insertAdjacentHTML('beforeend','<svg id="gdefs" width="0" height="0" style="position:absolute" aria-hidden="true"><defs><linearGradient id="gc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#3b82f6"/></linearGradient><linearGradient id="gg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#34d399"/><stop offset="1" stop-color="#0d9488"/></linearGradient><linearGradient id="gr" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fb7185"/><stop offset="1" stop-color="#e11d48"/></linearGradient></defs></svg>');
 document.querySelectorAll('#nav .nv').forEach(a=>{const n=NIC[a.getAttribute('href').slice(1)];if(n)a.insertAdjacentHTML('afterbegin',`<i data-lucide="${n}"></i>`)});
 document.querySelectorAll('#main .btn[data-a]').forEach(b=>{let n=BIC[b.dataset.a];if(!n)return;if(b.dataset.a==='new')n=b.dataset.id==='pay'?'banknote':'circle-plus';b.insertAdjacentHTML('afterbegin',`<i data-lucide="${n}" class="ic"></i>`)});
@@ -474,85 +476,123 @@ document.addEventListener('click',e=>{const n=$('#nav');if(n.classList.contains(
    Never place service_role/secret keys in this file. */
 const SUPABASE_URL='https://ifonagdcgkaqybvdgwqw.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY='sb_publishable_4AzAzEIZsGPDzd2ABaswBg_I_TTRXmI';
+/* Requests to Supabase give up after 25s instead of hanging on a slow gateway or 504. */
+const authFetch=(url,opts={})=>{const c=new AbortController(),t=setTimeout(()=>c.abort(),25000);if(opts.signal)opts.signal.addEventListener('abort',()=>c.abort());return fetch(url,{...opts,signal:c.signal}).finally(()=>clearTimeout(t))};
 const sbClient=(window.supabase&&window.supabase.createClient)
-  ? window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY)
+  ? window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true},global:{fetch:authFetch}})
   : null;
-let authUser=null,authReady=false,LM='in',authBusy=false;
 const currentProfile=()=>({
   email:authUser?.email||'',
   name:authUser?.user_metadata?.full_name||authUser?.user_metadata?.name||authUser?.email?.split('@')[0]||'Account'
 });
 function authErrorMessage(error){
-  const m=String(error?.message||'Authentication failed.');
+  const m=String(error?.message||''),st=error?.status||0,n=error?.name||'';
+  if(n==='AbortError'||/aborted|signal is aborted/i.test(m)) return 'The request timed out. Check your connection and try again.';
+  if(st===429||/rate limit|too many requests|security purposes/i.test(m)) return 'Too many attempts or emails sent. Please wait a minute and try again.';
+  if(st>=500||n==='AuthRetryableFetchError') return 'The sign-in service did not respond in time'+(st?' ('+st+')':'')+'. If you were signing up, your account may already exist: check your email for a confirmation link, or try logging in. If this keeps happening, the project email (SMTP) settings need attention.';
   if(/invalid login credentials/i.test(m)) return 'Email or password is incorrect.';
   if(/email not confirmed/i.test(m)) return 'Please confirm your email using the link we sent you, then log in.';
-  if(/user already registered/i.test(m)) return 'An account with this email already exists. Log in instead.';
-  if(/password should be at least/i.test(m)) return 'Use a longer password (at least 8 characters).';
-  return m;
+  if(/already registered|already been registered/i.test(m)) return 'An account with this email already exists. Log in instead.';
+  if(/password should be at least|weak password/i.test(m)) return 'Use a longer, stronger password (at least 8 characters).';
+  if(/not authorized|address is invalid|invalid email/i.test(m)) return 'This email address was rejected. Check it, or ask the site owner to review the email settings.';
+  return m||'Authentication failed. Please try again.';
 }
+const msgCls=()=>authMsg&&authMsg.t==='ok'?'up':'dn',
+  RESEND='<button id="resend" class="btn" type="button" data-a="resend" style="width:100%;margin-bottom:10px">Resend confirmation email</button>';
+function setMsg(t,m){authMsg=m?{t,m}:null;const el=$('#aerr');if(el){el.textContent=m||'';el.className=t==='ok'?'up':'dn'}}
+function showResend(){if(pendingEmail&&!$('#resend')&&$('#aerr'))$('#aerr').insertAdjacentHTML('afterend',RESEND)}
+function safeRender(){try{render()}catch(err){console.error('Render failed:',err)}}
 function LOGIN(){
   const up=LM==='up';
   if(!sbClient) return `<div class="auth"><div class="pn"><h2>Authentication could not load</h2><p class="mu">The Supabase JavaScript library did not load. Check your internet connection and reload the page.</p></div></div>`;
   if(!authReady) return `<div class="auth"><div class="pn"><h2>Account</h2><p class="mu">Checking your sign-in session…</p></div></div>`;
   if(authUser){
     const p=currentProfile(),initial=(p.name||'?')[0].toUpperCase();
-    return head('Account')+`<div class="auth"><div class="pn"><div class="av">${esc(initial)}</div><h2 style="margin-top:0">${esc(p.name)}</h2><p class="mu">${esc(p.email)}</p><p class="mu s">Signed in with Supabase Auth. Your account can be used on other devices; this does not yet sync this app's ledger or documents.</p><p id="aerr" class="dn" role="alert"></p><button class="btn p" data-a="signout" ${authBusy?'disabled':''}>${authBusy?'Signing out…':'Sign out'}</button></div></div>`;
+    return head('Account')+`<div class="auth"><div class="pn"><div class="av">${esc(initial)}</div><h2 style="margin-top:0">${esc(p.name)}</h2><p class="mu">${esc(p.email)}</p><p class="mu s">Signed in with Supabase Auth. Your account can be used on other devices; this does not yet sync this app's ledger or documents.</p><p id="aerr" class="${msgCls()}" role="alert">${esc(authMsg?authMsg.m:'')}</p><button class="btn p" data-a="signout" ${authBusy?'disabled':''}>${authBusy?'Signing out…':'Sign out'}</button></div></div>`;
   }
   const G='<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5a5.6 5.6 0 0 1-2.4 3.6v3h3.9c2.3-2.1 3.5-5.2 3.5-8.8z"/><path fill="#34A853" d="M12 24c3.2 0 6-1.1 7.9-2.9l-3.9-3c-1.1.7-2.4 1.1-4 1.1-3.1 0-5.7-2.1-6.6-4.9H1.4v3.1A12 12 0 0 0 12 24z"/><path fill="#FBBC05" d="M5.4 14.3a7.2 7.2 0 0 1 0-4.6V6.6H1.4a12 12 0 0 0 0 10.8z"/><path fill="#EA4335" d="M12 4.8c1.8 0 3.3.6 4.6 1.8l3.4-3.4A12 12 0 0 0 1.4 6.6l4 3.1C6.3 6.9 8.9 4.8 12 4.8z"/></svg>';
-  return `<div class="auth"><div class="pn"><div class="atabs"><button class="btn ${up?'':'p'}" data-a="lmode" data-id="in" type="button">Log in</button><button class="btn ${up?'p':''}" data-a="lmode" data-id="up" type="button">Sign up</button></div><button class="btn gbtn" data-a="google" type="button" style="width:100%">${G} Continue with Google</button><div class="or">or use email</div><form id="af" data-mode="${LM}">${up?`<label>Name<input name="name" autocomplete="name" required maxlength="100"></label>`:''}<label>Email<input name="email" type="email" autocomplete="email" required></label><label>Password<input name="pw" type="password" autocomplete="${up?'new-password':'current-password'}" minlength="8" required></label>${up?`<label>Confirm password<input name="pw2" type="password" autocomplete="new-password" minlength="8" required></label>`:''}<p id="aerr" class="dn" role="alert"></p><button class="btn p" style="width:100%" ${authBusy?'disabled':''}>${authBusy?'Please wait…':(up?'Create account':'Log in')}</button></form><p class="mu s" style="margin-top:12px">Secure email/password authentication is handled by Supabase. If email confirmation is enabled, confirm your email before logging in.</p></div></div>`;
+  return `<div class="auth"><div class="pn"><div class="atabs"><button class="btn ${up?'':'p'}" data-a="lmode" data-id="in" type="button">Log in</button><button class="btn ${up?'p':''}" data-a="lmode" data-id="up" type="button">Sign up</button></div><button class="btn gbtn" data-a="google" type="button" style="width:100%">${G} Continue with Google</button><div class="or">or use email</div><form id="af" data-mode="${LM}">${up?`<label>Name<input name="name" autocomplete="name" required maxlength="100"></label>`:''}<label>Email<input name="email" type="email" autocomplete="email" required></label><label>Password<input name="pw" type="password" autocomplete="${up?'new-password':'current-password'}" minlength="8" required></label>${up?`<label>Confirm password<input name="pw2" type="password" autocomplete="new-password" minlength="8" required></label>`:''}<p id="aerr" class="${msgCls()}" role="alert">${esc(authMsg?authMsg.m:'')}</p>${pendingEmail?RESEND:''}<button class="btn p" style="width:100%" ${authBusy?'disabled':''}>${authBusy?'Please wait…':(up?'Create account':'Log in')}</button></form><p class="mu s" style="margin-top:12px">Secure email/password authentication is handled by Supabase. If email confirmation is enabled, confirm your email before logging in.</p></div></div>`;
 }
 document.addEventListener('submit',async e=>{
   const fm=e.target;if(fm.id!=='af')return;
   e.preventDefault();
   if(!sbClient||authBusy)return;
-  const v=fm.elements,err=m=>{const el=$('#aerr');if(el){el.textContent=m;el.classList.remove('dn')}};
-  const email=v.email.value.trim().toLowerCase(),password=v.pw.value,up=fm.dataset.mode==='up';
-  if(up&&password!==v.pw2.value)return err('Passwords do not match.');
-  if(up&&password.length<8)return err('Use at least 8 characters for the password.');
-  authBusy=true;const btn=fm.querySelector('button[type="submit"],button:not([type])');if(btn){btn.disabled=true;btn.textContent=up?'Creating account…':'Logging in…'}
+  const v=fm.elements,up=fm.dataset.mode==='up',btn=fm.querySelector('button:not([type])'),label=up?'Create account':'Log in',
+    done=()=>{authBusy=false;if(btn){btn.disabled=false;btn.textContent=label}};
+  const email=v.email.value.trim().toLowerCase(),password=v.pw.value;
+  if(up&&!v.name.value.trim())return setMsg('err','Enter your name.');
+  if(password.length<8&&up)return setMsg('err','Use at least 8 characters for the password.');
+  if(up&&password!==v.pw2.value)return setMsg('err','Passwords do not match.');
+  authBusy=true;setMsg('err','');if(btn){btn.disabled=true;btn.textContent=up?'Creating account…':'Logging in…'}
   try{
     if(up){
       const name=v.name.value.trim();
-      const {data,error}=await sbClient.auth.signUp({email,password,options:{data:{full_name:name,name}}});
+      const {data,error}=await sbClient.auth.signUp({email,password,options:{data:{full_name:name,name},emailRedirectTo:location.origin+location.pathname}});
       if(error)throw error;
-      if(data.session){
-        toast('Account created');
-      }else{
-        const el=$('#aerr');if(el){el.textContent='Account created. Check your email for a confirmation link, then log in.';el.classList.remove('dn')}
-        authBusy=false;btn.disabled=false;btn.textContent='Create account';return;
-      }
+      if(data.session){toast('Account created')}                      /* email confirmation is off: the SIGNED_IN event shows the account */
+      else if(data.user&&Array.isArray(data.user.identities)&&data.user.identities.length===0){setMsg('err','An account with this email already exists. Log in instead.')}   /* Supabase hides duplicates by returning a user with no identities */
+      else{pendingEmail=email;setMsg('ok','Account created. We sent a confirmation link to '+email+'. Open it, then log in.');showResend()}
     }else{
       const {error}=await sbClient.auth.signInWithPassword({email,password});
       if(error)throw error;
-      toast('Welcome back');
+      pendingEmail='';toast('Welcome back');
     }
-  }catch(error){err(authErrorMessage(error))}
-  finally{authBusy=false;if($('#main'))render()}
+  }catch(error){
+    if(/email not confirmed/i.test(error?.message||'')||(up&&(error?.status>=500||error?.name==='AuthRetryableFetchError'||error?.name==='AbortError')))pendingEmail=email;
+    setMsg('err',authErrorMessage(error));showResend();
+  }finally{done()}
 });
-act.lmode=m=>{LM=m;render()};
+act.lmode=m=>{LM=m;authMsg=null;render()};
 act.signout=async()=>{
   if(!sbClient||authBusy)return;
-  authBusy=true;render();
-  const {error}=await sbClient.auth.signOut();
+  authBusy=true;safeRender();
+  const {error}=await sbClient.auth.signOut({scope:'local'});   /* local: ends this device's session, does not log out other devices */
   authBusy=false;
-  if(error){toast(authErrorMessage(error));render();return}
-  toast('Signed out');render();
+  toast(error?authErrorMessage(error):'Signed out');
+  safeRender();                                                  /* on success the SIGNED_OUT event has already updated the UI */
+};
+act.resend=async()=>{
+  if(!sbClient||authBusy||!pendingEmail)return;
+  authBusy=true;const b=$('#resend');if(b){b.disabled=true;b.textContent='Sending…'}
+  try{
+    const {error}=await sbClient.auth.resend({type:'signup',email:pendingEmail,options:{emailRedirectTo:location.origin+location.pathname}});
+    if(error)throw error;
+    setMsg('ok','Confirmation email sent to '+pendingEmail+'. It can take a minute to arrive; check spam too.');
+  }catch(error){setMsg('err',authErrorMessage(error))}
+  finally{authBusy=false;const x=$('#resend');if(x){x.disabled=false;x.textContent='Resend confirmation email'}}
 };
 act.google=async()=>{
   if(!sbClient)return;
-  const {error}=await sbClient.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.origin+location.pathname+'#login'}});
+  const {error}=await sbClient.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.origin+location.pathname}});
   if(error)open(`<h3>Google sign-in could not start</h3><p class="mu">${esc(authErrorMessage(error))}</p><div class="row"><button class="btn p" data-a="close">Close</button></div>`);
 };
-sbClient?.auth.onAuthStateChange((_event,session)=>{
-  authUser=session?.user||null;authReady=true;
-  if($('#main'))render();
-});
-if(sbClient){
-  sbClient.auth.getSession().then(({data,error})=>{
-    if(error)console.warn('Supabase session check:',error.message);
-    authUser=data?.session?.user||null;authReady=true;render();
-  }).catch(()=>{authReady=true;render()});
+/* The nav item reads "Sign out" while signed in, so clicking it must sign out rather than just open the page. */
+document.addEventListener('click',e=>{const a=e.target.closest('#nav a[href="#login"]');if(a&&authUser){e.preventDefault();act.signout()}},true);
+/* One place applies auth changes. It re-renders only when the signed-in user really changed,
+   so hourly TOKEN_REFRESHED events and the duplicate INITIAL_SESSION/getSession results no longer repaint the page. */
+function setAuth(user){
+  const changed=!authReady||(authUser?authUser.id:null)!==(user?user.id:null);
+  authUser=user||null;authReady=true;
+  if(changed){if(authUser)pendingEmail='';safeRender()}
 }
+/* Email links that fail come back as #error=...&error_code=otp_expired. Show a readable message instead of ignoring it. */
+(function urlAuthErrors(){
+  const q=new URLSearchParams((location.hash.startsWith('#')?location.hash.slice(1):'')+'&'+location.search.slice(1)),c=q.get('error_code')||q.get('error');
+  if(!c)return;
+  const d=(q.get('error_description')||'').replace(/\+/g,' ');
+  authMsg={t:'err',m:/expired|invalid|denied/i.test(c+' '+d)?'That email link is invalid or has expired. Log in, or sign up again to get a new confirmation email.':(d||'The sign-in link could not be used.')};
+  LM='in';try{history.replaceState(null,'',location.pathname+'#login')}catch(_){}
+})();
+if(sbClient){
+  /* Keep this callback synchronous: awaiting other Supabase calls inside it can deadlock the client. */
+  sbClient.auth.onAuthStateChange((event,session)=>{
+    if(event==='TOKEN_REFRESHED')return;
+    setAuth(session?session.user:null);
+  });
+  sbClient.auth.getSession()
+    .then(({data,error})=>{if(error)console.warn('Supabase session check:',error.message);setAuth(data&&data.session?data.session.user:null)})
+    .catch(err=>{console.warn('Supabase session check failed:',err&&err.message||err);setAuth(null)});
+}else{authReady=true}
 PG.login=LOGIN;
 function render(){const p=(location.hash||'#dashboard').slice(1),pg=PG[p]?p:'dashboard';$('#nav').innerHTML=`<div class="brand" aria-label="FundFlow"><span class="bl"><svg class="logo" viewBox="0 0 112 124" aria-hidden="true"><defs><linearGradient id="lw" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#E5E5E5"/></linearGradient><linearGradient id="lgd" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFC24D"/><stop offset="1" stop-color="#E08A00"/></linearGradient></defs><path fill="url(#lw)" d="M2 44C4 24 22 10 44 10H78L72 21H52C30 21 12 31 2 50Z"/><path fill="#E5E5E5" d="M2 76C4 56 22 42 44 42H88C88 58 76 66 58 66H36C20 66 8 70 2 82Z"/><path fill="url(#lgd)" d="M2 120C10 96 30 82 54 82H62C60 98 44 110 26 111C16 112 8 115 2 120Z"/><polygon fill="url(#lgd)" points="84,2 108,2 108,26 99,17 76,40 70,34 93,11"/></svg><span class="bn">Fund<b>Flow</b></span></span><small>Track capital. Measure returns.</small></div>`+NAV.map(([k,l])=>`<a class="nv ${k===pg?'on':''}" href="#${k}">${l}</a>`).join('');$('#firms').innerHTML=S.firms.map(f=>`<option value="${esc(f)}">`).join('');$('#main').innerHTML=PG[pg]();deco()}
 window.addEventListener('hashchange',()=>{LQ.q='';LQ.st='';render()});render();
